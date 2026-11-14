@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.IOException
+import java.io.InputStream
 import java.net.URLEncoder
 import java.time.Instant
 import java.util.concurrent.TimeUnit
@@ -62,6 +63,25 @@ class GraphClient(private val auth: AuthManager) {
                 200 -> {
                     if (start == 0L) return response.body!!.bytes()
                     throw IOException("Server does not support partial downloads")
+                }
+                401, 403, 404, 410 -> throw ExpiredLinkException()
+                else -> throw IOException("Download failed (HTTP ${response.code})")
+            }
+        }
+    }
+
+    /** Opens a byte range and hands its body to [consume] as it streams in. */
+    fun openRange(downloadUrl: String, start: Long, endInclusive: Long, consume: (InputStream) -> Unit) {
+        val request = Request.Builder()
+            .url(downloadUrl)
+            .header("Range", "bytes=$start-$endInclusive")
+            .build()
+        http.newCall(request).execute().use { response ->
+            when (response.code) {
+                206 -> consume(response.body!!.byteStream())
+                200 -> {
+                    if (start != 0L) throw IOException("Server does not support partial downloads")
+                    consume(response.body!!.byteStream())
                 }
                 401, 403, 404, 410 -> throw ExpiredLinkException()
                 else -> throw IOException("Download failed (HTTP ${response.code})")

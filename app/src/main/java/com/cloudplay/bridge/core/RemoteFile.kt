@@ -1,7 +1,9 @@
 package com.cloudplay.bridge.core
 
 import com.cloudplay.bridge.core.ChunkCache.Companion.CHUNK_SIZE
+import java.io.EOFException
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
@@ -25,14 +27,47 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
      */
     fun fetchRun(first: Long, count: Int) {
         val last = minOf(first + count, chunkCount) - 1
-        if (last < first) return
-        val start = first * CHUNK_SIZE
-        val data = downloadRange(start, last * CHUNK_SIZE + chunkLength(last) - 1)
-        for (index in first..last) {
-            val from = ((index - first) * CHUNK_SIZE).toInt()
-            val to = from + chunkLength(index).toInt()
-            if (to > data.size) break // short response: never cache a partial chunk
-            core.cache.put(key, index, data, from, to - from)
+        var next = first
+        var lastError: Exception? = null
+        var attempt = 0
+        // Each chunk is cached the moment its bytes arrive, so a game waiting on the first
+        // chunk of a run doesn't wait for the whole run. A dropped connection resumes
+        // from the first chunk not yet stored.
+        while (next <= last && attempt < 6) {
+            try {
+                val url = downloadUrl ?: refreshUrl()
+                core.graph.openRange(url, next * CHUNK_SIZE, last * CHUNK_SIZE + chunkLength(last) - 1) { input ->
+                    while (next <= last) {
+                        val buffer = ByteArray(chunkLength(next).toInt())
+                        readFully(input, buffer)
+                        core.cache.put(key, next, buffer)
+                        Stats.bytes.addAndGet(buffer.size.toLong())
+                        next++
+                    }
+                }
+            } catch (e: ExpiredLinkException) {
+                downloadUrl = null
+                lastError = e
+                attempt++
+            } catch (e: IOException) {
+                lastError = e
+                attempt++
+                Thread.sleep(minOf(500L * attempt, 2000L))
+            }
+        }
+        if (next <= last) {
+            val error = lastError ?: IOException("Download failed")
+            Stats.error("${item.name}: ${error.message}")
+            throw error
+        }
+    }
+
+    private fun readFully(input: InputStream, buffer: ByteArray) {
+        var done = 0
+        while (done < buffer.size) {
+            val n = input.read(buffer, done, buffer.size - done)
+            if (n < 0) throw EOFException("Response ended early")
+            done += n
         }
     }
 
