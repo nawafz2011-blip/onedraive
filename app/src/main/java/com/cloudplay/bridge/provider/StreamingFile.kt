@@ -122,6 +122,6 @@ class StreamingFile(
 
     private companion object {
         const val TAG = "StreamingFile"
-        const val READ_AHEAD = 6
+        const val READ_AHEAD = 16
     }
 }

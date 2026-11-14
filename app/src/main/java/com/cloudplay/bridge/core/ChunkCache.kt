@@ -34,7 +34,7 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
         }
         locks.remove(target.name)
         remember(target.name, data)
-        if (++writesSinceTrim >= 8) {
+        if (++writesSinceTrim >= 64) {
             writesSinceTrim = 0
             trim()
         }
@@ -82,8 +82,8 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
         File(dir, key.replace(Regex("[^A-Za-z0-9]"), "_") + "_" + index)
 
     companion object {
-        const val CHUNK_SIZE = 2L * 1024 * 1024
-        private const val MEMORY_CHUNKS = 16
+        const val CHUNK_SIZE = 512L * 1024
+        private const val MEMORY_CHUNKS = 64
         const val GB = 1024L * 1024 * 1024
     }
 }
