@@ -16,6 +16,7 @@ import com.cloudplay.bridge.core.Core
 import com.cloudplay.bridge.core.DriveItem
 import com.cloudplay.bridge.core.GraphClient.Companion.ROOT_ID
 import com.cloudplay.bridge.core.Instance
+import com.cloudplay.bridge.core.LiveNotifier
 import java.io.FileNotFoundException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ThreadPoolExecutor
@@ -118,6 +119,7 @@ class OneDriveProvider : DocumentsProvider() {
         val item = items[documentId]?.takeIf { fresh && it.downloadUrl != null } ?: fetchItem(documentId)
         if (item.isFolder) throw FileNotFoundException("${item.name} is a folder")
         val thread = HandlerThread("cloudplay-${item.name}").apply { start() }
+        LiveNotifier.start(context!!)
         val storage = context!!.getSystemService(StorageManager::class.java)
         return try {
             storage.openProxyFileDescriptor(

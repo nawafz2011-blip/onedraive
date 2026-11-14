@@ -9,6 +9,7 @@ import com.cloudplay.bridge.core.ChunkCache.Companion.CHUNK_SIZE
 import com.cloudplay.bridge.core.DriveItem
 import com.cloudplay.bridge.core.Instance
 import com.cloudplay.bridge.core.RemoteFile
+import com.cloudplay.bridge.core.Stats
 import java.io.IOException
 import java.util.Collections
 import java.util.concurrent.ExecutorService
@@ -21,7 +22,7 @@ class StreamingFile(
     private val thread: HandlerThread,
 ) : ProxyFileDescriptorCallback() {
 
-    private val remote = RemoteFile(core, item)
+    private val remote = RemoteFile(core, item).also { Stats.openFiles.incrementAndGet() }
     private val size = item.size
     private val inFlight = Collections.synchronizedSet(mutableSetOf<Long>())
 
@@ -72,12 +73,23 @@ class StreamingFile(
     }
 
     override fun onRelease() {
+        Stats.openFiles.decrementAndGet()
         lastData = null
         thread.quitSafely()
     }
 
     private fun chunk(index: Long): ByteArray {
         if (index == lastIndex) lastData?.let { return it }
+        val blocking = !core.cache.has(remote.key, index)
+        if (blocking) Stats.waiting.incrementAndGet()
+        try {
+            return load(index)
+        } finally {
+            if (blocking) Stats.waiting.decrementAndGet()
+        }
+    }
+
+    private fun load(index: Long): ByteArray {
         // Already coming in a read-ahead request: wait for it instead of downloading it twice.
         val deadline = System.currentTimeMillis() + 15_000
         while (index in inFlight && !core.cache.has(remote.key, index) && System.currentTimeMillis() < deadline) {

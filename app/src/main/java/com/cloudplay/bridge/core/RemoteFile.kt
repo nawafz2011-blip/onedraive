@@ -109,6 +109,10 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
 object Stats {
     val bytes = AtomicLong()
     val errors = AtomicInteger()
+    val openFiles = AtomicInteger()
+
+    /** Emulator reads currently blocked waiting for data from OneDrive. */
+    val waiting = AtomicInteger()
 
     @Volatile
     var lastError: String? = null
