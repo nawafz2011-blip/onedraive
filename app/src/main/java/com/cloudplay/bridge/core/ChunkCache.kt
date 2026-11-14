@@ -51,7 +51,10 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
 
     @Synchronized
     fun trim() {
-        val files = dir.listFiles()?.filter { !it.name.endsWith(".tmp") } ?: return
+        val pinned = settings.pinned.map { prefix(it.key) }
+        val all = dir.listFiles()?.filter { !it.name.endsWith(".tmp") } ?: return
+        // Prepared (pinned) games are never evicted; only streamed chunks count toward the limit.
+        val files = all.filter { f -> pinned.none { f.name.startsWith(it) } }
         var total = files.sumOf { it.length() }
         val max = maxBytes()
         if (total <= max) return
@@ -62,10 +65,24 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
         }
     }
 
+    /** Clears streamed chunks; prepared games stay. */
     @Synchronized
     fun clear() {
         synchronized(memory) { memory.clear() }
-        dir.listFiles()?.forEach { it.delete() }
+        val pinned = settings.pinned.map { prefix(it.key) }
+        dir.listFiles()?.filter { f -> pinned.none { f.name.startsWith(it) } }?.forEach { it.delete() }
+    }
+
+    @Synchronized
+    fun removeKey(key: String) {
+        val p = prefix(key)
+        synchronized(memory) { memory.keys.removeAll { it.startsWith(p) } }
+        dir.listFiles { f -> f.name.startsWith(p) }?.forEach { it.delete() }
+    }
+
+    fun bytesFor(key: String): Long {
+        val p = prefix(key)
+        return dir.listFiles { f -> f.name.startsWith(p) }?.sumOf { it.length() } ?: 0L
     }
 
     private fun readIfPresent(f: File): ByteArray? {
@@ -78,8 +95,9 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
         }
     }
 
-    private fun file(key: String, index: Long) =
-        File(dir, key.replace(Regex("[^A-Za-z0-9]"), "_") + "_" + index)
+    private fun prefix(key: String) = key.replace(Regex("[^A-Za-z0-9]"), "_") + "_"
+
+    private fun file(key: String, index: Long) = File(dir, prefix(key) + index)
 
     companion object {
         const val CHUNK_SIZE = 512L * 1024

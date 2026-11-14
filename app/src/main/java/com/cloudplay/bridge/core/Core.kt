@@ -27,10 +27,11 @@ class Instance(context: Context) {
     val auth = AuthManager(context, settings)
     val graph = GraphClient(auth)
     // Folder name tracks CHUNK_SIZE: chunks of a different size must never be mixed.
-    val cache = ChunkCache(File(context.cacheDir, "chunks-512k"), settings).also {
-        File(context.cacheDir, "chunks").deleteRecursively()
-        File(context.cacheDir, "chunks-2m").deleteRecursively()
+    // In filesDir, not cacheDir: Android may wipe cacheDir and lose prepared games.
+    val cache = ChunkCache(File(context.filesDir, "chunks-512k"), settings).also {
+        for (old in listOf("chunks", "chunks-2m", "chunks-512k")) File(context.cacheDir, old).deleteRecursively()
     }
+    val preloader = Preloader(this) { context.filesDir.usableSpace }
 }
 
 class Settings(context: Context) {
@@ -39,6 +40,18 @@ class Settings(context: Context) {
     var clientId: String
         get() = prefs.getString("client_id", "") ?: ""
         set(value) = prefs.edit().putString("client_id", value).apply()
+
+    val pinned: List<Pinned>
+        get() = prefs.getStringSet("pinned", emptySet()).orEmpty().mapNotNull { Pinned.decode(it) }
+
+    @Synchronized
+    fun pin(p: Pinned) = savePinned(pinned.filter { it.key != p.key } + p)
+
+    @Synchronized
+    fun unpin(key: String) = savePinned(pinned.filter { it.key != key })
+
+    private fun savePinned(list: List<Pinned>) =
+        prefs.edit().putStringSet("pinned", list.map { it.encode() }.toSet()).apply()
 
     var cacheMaxGb: Int
         get() = prefs.getInt("cache_max_gb", 4)

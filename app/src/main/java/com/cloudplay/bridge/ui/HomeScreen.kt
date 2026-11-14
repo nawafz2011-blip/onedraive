@@ -20,6 +20,7 @@ import com.cloudplay.bridge.core.ChunkCache.Companion.GB
 import com.cloudplay.bridge.core.Core
 import com.cloudplay.bridge.BuildConfig
 import com.cloudplay.bridge.core.Instance
+import com.cloudplay.bridge.core.Stats
 import com.cloudplay.bridge.core.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -40,6 +41,7 @@ fun HomeScreen(core: Instance) {
         Text("ألعابي السحابية", style = MaterialTheme.typography.headlineSmall)
         UpdateCard()
         if (signedIn) AccountCard(core) else SignInCard(core)
+        ActivityCard()
         CacheCard(core)
         HowToCard()
     }
@@ -219,6 +221,36 @@ private fun UpdateCard() {
                     Text(s.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                     OutlinedButton(onClick = { check() }) { Text("حاول مرة ثانية") }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityCard() {
+    var speed by remember { mutableLongStateOf(0L) }
+    var total by remember { mutableLongStateOf(Stats.bytes.get()) }
+    var errors by remember { mutableIntStateOf(Stats.errors.get()) }
+    var lastError by remember { mutableStateOf(Stats.lastError) }
+    LaunchedEffect(Unit) {
+        var last = Stats.bytes.get()
+        while (true) {
+            delay(1000)
+            val now = Stats.bytes.get()
+            speed = now - last
+            last = now
+            total = now
+            errors = Stats.errors.get()
+            lastError = Stats.lastError
+        }
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("النشاط", style = MaterialTheme.typography.titleMedium)
+            Text("السرعة الحين: ${formatBytes(speed)}/ث · المحمّل: ${formatBytes(total)}", style = MaterialTheme.typography.bodySmall)
+            if (errors > 0) {
+                Text("أخطاء: $errors", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
         }
     }

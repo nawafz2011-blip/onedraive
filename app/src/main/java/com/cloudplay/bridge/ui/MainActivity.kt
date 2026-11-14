@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -60,6 +61,11 @@ private fun AppRoot(core: Instance) {
                     label = { Text("الرئيسية") },
                 )
                 NavigationBarItem(
+                    selected = tab == 2, onClick = { tab = 2 },
+                    icon = { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) },
+                    label = { Text("تجهيز") },
+                )
+                NavigationBarItem(
                     selected = tab == 1, onClick = { tab = 1 },
                     icon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
                     label = { Text("المحاكيات") },
@@ -68,7 +74,11 @@ private fun AppRoot(core: Instance) {
         }
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
-            if (tab == 0) HomeScreen(core) else EmulatorsScreen()
+            when (tab) {
+                0 -> HomeScreen(core)
+                2 -> PrepareScreen(core)
+                else -> EmulatorsScreen()
+            }
         }
     }
 }
