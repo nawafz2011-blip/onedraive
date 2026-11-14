@@ -28,6 +28,7 @@ class StreamingFile(
     private var lastIndex = -1L
     private var lastData: ByteArray? = null
     private var lastReadIndex = -2L
+    private var reads = 0
 
     override fun onGetSize(): Long = size
 
@@ -49,9 +50,14 @@ class StreamingFile(
             }
             // Read far ahead while the emulator reads straight through the file (loading a
             // game); only a little after a jump, so scanning headers doesn't waste bandwidth.
+            // Once the file has been read many times it's a running game, not a folder scan:
+            // games read lots of small pieces scattered through the file (e.g. resource packs),
+            // so fetch a wide window after every read instead of waiting on each piece.
+            reads++
             val sequential = index in lastReadIndex - 1..lastReadIndex + 2
             lastReadIndex = index
-            for (i in 1..(if (sequential) READ_AHEAD else JUMP_AHEAD)) prefetch(index + i)
+            val ahead = if (sequential || reads > PLAYING_AFTER_READS) READ_AHEAD else JUMP_AHEAD
+            for (i in 1..ahead) prefetch(index + i)
             return done
         } catch (e: Throwable) {
             // Any error (including OutOfMemoryError) must become EIO: an uncaught
@@ -79,7 +85,7 @@ class StreamingFile(
     private fun prefetch(index: Long) {
         if (index >= remote.chunkCount || core.cache.has(remote.key, index) || !inFlight.add(index)) return
         try {
-            prefetcher.execute {
+            prefetcher.execute(PrefetchTask(work = {
                 try {
                     remote.chunk(index)
                 } catch (e: Throwable) {
@@ -87,7 +93,7 @@ class StreamingFile(
                 } finally {
                     inFlight.remove(index)
                 }
-            }
+            }, onDrop = { inFlight.remove(index) }))
         } catch (e: RejectedExecutionException) {
             // Prefetch queue is full (e.g. emulator scanning many files); skip it.
             inFlight.remove(index)
@@ -98,5 +104,6 @@ class StreamingFile(
         const val TAG = "StreamingFile"
         const val READ_AHEAD = 32
         const val JUMP_AHEAD = 2
+        const val PLAYING_AFTER_READS = 50
     }
 }

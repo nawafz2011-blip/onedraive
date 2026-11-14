@@ -17,7 +17,6 @@ import com.cloudplay.bridge.core.DriveItem
 import com.cloudplay.bridge.core.GraphClient.Companion.ROOT_ID
 import com.cloudplay.bridge.core.Instance
 import java.io.FileNotFoundException
-import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -27,7 +26,7 @@ class OneDriveProvider : DocumentsProvider() {
     private val core: Instance by lazy { Core.get(context!!) }
     // Bounded queue: when an emulator scans a whole folder, read-ahead requests would
     // otherwise pile up without limit and compete with the reads it is waiting on.
-    private val prefetcher = ThreadPoolExecutor(8, 8, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(64))
+    private val prefetcher = ThreadPoolExecutor(8, 8, 0L, TimeUnit.MILLISECONDS, PrefetchQueue(256))
     private val parents = ConcurrentHashMap<String, String>()
     private val items = ConcurrentHashMap<String, DriveItem>()
     private val itemTimes = ConcurrentHashMap<String, Long>()
