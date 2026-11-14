@@ -27,9 +27,10 @@ class OneDriveProvider : DocumentsProvider() {
     private val core: Instance by lazy { Core.get(context!!) }
     // Bounded queue: when an emulator scans a whole folder, read-ahead requests would
     // otherwise pile up without limit and compete with the reads it is waiting on.
-    private val prefetcher = ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(4))
+    private val prefetcher = ThreadPoolExecutor(4, 4, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(16))
     private val parents = ConcurrentHashMap<String, String>()
     private val items = ConcurrentHashMap<String, DriveItem>()
+    private val itemTimes = ConcurrentHashMap<String, Long>()
     private val listings = ConcurrentHashMap<String, Pair<Long, List<DriveItem>>>()
 
     override fun onCreate(): Boolean = true
@@ -84,7 +85,7 @@ class OneDriveProvider : DocumentsProvider() {
             fresh
         }
         for (child in children) {
-            items[child.id] = child
+            remember(child)
             parents[child.id] = parentDocumentId
             addRow(cursor, child)
         }
@@ -110,7 +111,10 @@ class OneDriveProvider : DocumentsProvider() {
         signal: CancellationSignal?,
     ): ParcelFileDescriptor {
         if (mode != "r") throw FileNotFoundException("CloudPlay is read-only")
-        val item = fetchItem(documentId)
+        // Reuse the item from the folder listing (its download link stays valid for a while,
+        // and an expired one is refreshed on first read) instead of a network round trip per open.
+        val fresh = (itemTimes[documentId] ?: 0L) > System.currentTimeMillis() - ITEM_TTL_MS
+        val item = items[documentId]?.takeIf { fresh && it.downloadUrl != null } ?: fetchItem(documentId)
         if (item.isFolder) throw FileNotFoundException("${item.name} is a folder")
         val thread = HandlerThread("cloudplay-${item.name}").apply { start() }
         val storage = context!!.getSystemService(StorageManager::class.java)
@@ -130,11 +134,16 @@ class OneDriveProvider : DocumentsProvider() {
 
     private fun fetchItem(id: String): DriveItem = try {
         core.graph.item(id).also {
-            items[id] = it
+            remember(it)
             it.parentId?.let { p -> parents[id] = p }
         }
     } catch (e: Exception) {
         throw FileNotFoundException("Couldn't read OneDrive item: ${e.message}")
+    }
+
+    private fun remember(item: DriveItem) {
+        items[item.id] = item
+        itemTimes[item.id] = System.currentTimeMillis()
     }
 
     private fun addRow(cursor: MatrixCursor, item: DriveItem) {
@@ -157,7 +166,8 @@ class OneDriveProvider : DocumentsProvider() {
     }
 
     private companion object {
-        const val LISTING_TTL_MS = 60_000L
+        const val LISTING_TTL_MS = 5 * 60_000L
+        const val ITEM_TTL_MS = 30 * 60_000L
         val DEFAULT_ROOT_PROJECTION = arrayOf(
             Root.COLUMN_ROOT_ID, Root.COLUMN_DOCUMENT_ID, Root.COLUMN_TITLE,
             Root.COLUMN_SUMMARY, Root.COLUMN_FLAGS, Root.COLUMN_ICON,

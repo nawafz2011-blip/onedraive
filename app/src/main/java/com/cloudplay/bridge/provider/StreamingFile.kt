@@ -30,6 +30,7 @@ class StreamingFile(
 
     private var lastIndex = -1L
     private var lastData: ByteArray? = null
+    private var lastReadIndex = -2L
 
     override fun onGetSize(): Long = size
 
@@ -49,8 +50,11 @@ class StreamingFile(
                 System.arraycopy(chunk, within, data, done, n)
                 done += n
             }
-            prefetch(index + 1)
-            prefetch(index + 2)
+            // Read ahead only while the emulator reads straight through the file
+            // (loading a game). Random reads (scanning headers) would just waste bandwidth.
+            val sequential = index == lastReadIndex || index == lastReadIndex + 1
+            lastReadIndex = index
+            if (sequential) for (i in 1..READ_AHEAD) prefetch(index + i)
             return done
         } catch (e: Throwable) {
             // Any error (including OutOfMemoryError) must become EIO: an uncaught
@@ -118,5 +122,6 @@ class StreamingFile(
 
     private companion object {
         const val TAG = "StreamingFile"
+        const val READ_AHEAD = 6
     }
 }

@@ -5,6 +5,11 @@ import java.util.concurrent.ConcurrentHashMap
 
 class ChunkCache(private val dir: File, private val settings: Settings) {
     private val locks = ConcurrentHashMap<String, Any>()
+    // Recently used chunks kept in RAM so jumping between a few spots of a file
+    // doesn't re-read them from storage every time.
+    private val memory = object : LinkedHashMap<String, ByteArray>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > MEMORY_CHUNKS
+    }
     @Volatile
     private var writesSinceTrim = 0
 
@@ -17,7 +22,8 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
 
     fun get(key: String, index: Long, fetch: () -> ByteArray): ByteArray {
         val target = file(key, index)
-        readIfPresent(target)?.let { return it }
+        synchronized(memory) { memory[target.name] }?.let { return it }
+        readIfPresent(target)?.let { remember(target.name, it); return it }
         val lock = locks.computeIfAbsent(target.name) { Any() }
         val data = synchronized(lock) {
             readIfPresent(target) ?: fetch().also { bytes ->
@@ -27,11 +33,16 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
             }
         }
         locks.remove(target.name)
+        remember(target.name, data)
         if (++writesSinceTrim >= 8) {
             writesSinceTrim = 0
             trim()
         }
         return data
+    }
+
+    private fun remember(name: String, data: ByteArray) {
+        synchronized(memory) { memory[name] = data }
     }
 
     fun usedBytes(): Long = dir.listFiles()?.sumOf { it.length() } ?: 0L
@@ -53,6 +64,7 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
 
     @Synchronized
     fun clear() {
+        synchronized(memory) { memory.clear() }
         dir.listFiles()?.forEach { it.delete() }
     }
 
@@ -70,7 +82,8 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
         File(dir, key.replace(Regex("[^A-Za-z0-9]"), "_") + "_" + index)
 
     companion object {
-        const val CHUNK_SIZE = 4L * 1024 * 1024
+        const val CHUNK_SIZE = 2L * 1024 * 1024
+        private const val MEMORY_CHUNKS = 16
         const val GB = 1024L * 1024 * 1024
     }
 }

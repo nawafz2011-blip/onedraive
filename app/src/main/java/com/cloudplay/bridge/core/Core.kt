@@ -26,7 +26,10 @@ class Instance(context: Context) {
     val settings = Settings(context)
     val auth = AuthManager(context, settings)
     val graph = GraphClient(auth)
-    val cache = ChunkCache(File(context.cacheDir, "chunks"), settings)
+    // Folder name tracks CHUNK_SIZE: chunks of a different size must never be mixed.
+    val cache = ChunkCache(File(context.cacheDir, "chunks-2m"), settings).also {
+        File(context.cacheDir, "chunks").deleteRecursively()
+    }
 }
 
 class Settings(context: Context) {
