@@ -47,11 +47,11 @@ class StreamingFile(
                 System.arraycopy(chunk, within, data, done, n)
                 done += n
             }
-            // Read ahead only while the emulator reads straight through the file
-            // (loading a game). Random reads (scanning headers) would just waste bandwidth.
-            val sequential = index == lastReadIndex || index == lastReadIndex + 1
+            // Read far ahead while the emulator reads straight through the file (loading a
+            // game); only a little after a jump, so scanning headers doesn't waste bandwidth.
+            val sequential = index in lastReadIndex - 1..lastReadIndex + 2
             lastReadIndex = index
-            if (sequential) for (i in 1..READ_AHEAD) prefetch(index + i)
+            for (i in 1..(if (sequential) READ_AHEAD else JUMP_AHEAD)) prefetch(index + i)
             return done
         } catch (e: Throwable) {
             // Any error (including OutOfMemoryError) must become EIO: an uncaught
@@ -96,6 +96,7 @@ class StreamingFile(
 
     private companion object {
         const val TAG = "StreamingFile"
-        const val READ_AHEAD = 16
+        const val READ_AHEAD = 32
+        const val JUMP_AHEAD = 2
     }
 }

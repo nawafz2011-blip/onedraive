@@ -1,5 +1,6 @@
 package com.cloudplay.bridge.core
 
+import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -26,6 +27,8 @@ class GraphClient(private val auth: AuthManager) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
+        // Enough warm connections for all read-ahead threads, so each chunk skips a new TLS handshake.
+        .connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
         .build()
 
     fun item(id: String): DriveItem = parse(getJson("$BASE/items/${enc(id)}"))
