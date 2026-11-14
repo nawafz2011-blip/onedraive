@@ -29,6 +29,7 @@ class GraphClient(private val auth: AuthManager) {
         .readTimeout(60, TimeUnit.SECONDS)
         // Enough warm connections for all read-ahead threads, so each chunk skips a new TLS handshake.
         .connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
+        .dns(CachingDns)
         .build()
 
     fun item(id: String): DriveItem = parse(getJson("$BASE/items/${enc(id)}"))

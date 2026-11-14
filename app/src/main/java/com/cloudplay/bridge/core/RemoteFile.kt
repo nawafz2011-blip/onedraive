@@ -22,7 +22,8 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
         val start = index * CHUNK_SIZE
         val end = start + chunkLength(index) - 1
         var lastError: Exception? = null
-        repeat(4) { attempt ->
+        // Ride out short network drops (about 10 s) instead of failing the emulator's read.
+        repeat(6) { attempt ->
             try {
                 val url = downloadUrl ?: refreshUrl()
                 return core.graph.readRange(url, start, end).also { Stats.bytes.addAndGet(it.size.toLong()) }
@@ -31,7 +32,7 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
                 lastError = e
             } catch (e: IOException) {
                 lastError = e
-                Thread.sleep(300L * (attempt + 1))
+                Thread.sleep(minOf(500L * (attempt + 1), 2000L))
             }
         }
         val error = lastError ?: IOException("Download failed")

@@ -165,7 +165,7 @@ class OneDriveProvider : DocumentsProvider() {
     }
 
     private companion object {
-        const val LISTING_TTL_MS = 5 * 60_000L
+        const val LISTING_TTL_MS = 20_000L
         const val ITEM_TTL_MS = 30 * 60_000L
         val DEFAULT_ROOT_PROJECTION = arrayOf(
             Root.COLUMN_ROOT_ID, Root.COLUMN_DOCUMENT_ID, Root.COLUMN_TITLE,
