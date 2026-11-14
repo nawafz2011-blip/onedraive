@@ -84,6 +84,8 @@ class OneDriveProvider : DocumentsProvider() {
             fresh
         }
         for (child in children) {
+            // Empty files (failed or unfinished uploads) crash emulators that try to parse them.
+            if (!child.isFolder && child.size == 0L) continue
             remember(child)
             parents[child.id] = parentDocumentId
             addRow(cursor, child)
