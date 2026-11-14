@@ -54,10 +54,12 @@ class StreamingFile(
             // games read lots of small pieces scattered through the file (e.g. resource packs),
             // so fetch a wide window after every read instead of waiting on each piece.
             reads++
-            val sequential = index in lastReadIndex - 1..lastReadIndex + 2
-            lastReadIndex = index
-            val ahead = if (sequential || reads > PLAYING_AFTER_READS) READ_AHEAD else JUMP_AHEAD
-            for (i in 1..ahead) prefetch(index + i)
+            if (index != lastReadIndex) {
+                val sequential = index in lastReadIndex - 1..lastReadIndex + 2
+                lastReadIndex = index
+                val ahead = if (sequential || reads > PLAYING_AFTER_READS) READ_AHEAD else JUMP_AHEAD
+                prefetchWindow(index + 1, ahead)
+            }
             return done
         } catch (e: Throwable) {
             // Any error (including OutOfMemoryError) must become EIO: an uncaught
@@ -82,27 +84,45 @@ class StreamingFile(
         return bytes
     }
 
-    private fun prefetch(index: Long) {
-        if (index >= remote.chunkCount || core.cache.has(remote.key, index) || !inFlight.add(index)) return
+    /** Queues the missing chunks of [from, from + count) as runs of up to [RUN] chunks per request. */
+    private fun prefetchWindow(from: Long, count: Int) {
+        val end = minOf(from + count, remote.chunkCount)
+        var i = from
+        while (i < end) {
+            if (i in inFlight || core.cache.has(remote.key, i)) {
+                i++
+                continue
+            }
+            val run = mutableListOf<Long>()
+            while (i < end && run.size < RUN && !core.cache.has(remote.key, i) && inFlight.add(i)) {
+                run += i
+                i++
+            }
+            if (run.isEmpty()) i++ else submit(run)
+        }
+    }
+
+    private fun submit(run: List<Long>) {
+        val release = { run.forEach { inFlight.remove(it) } }
         try {
             prefetcher.execute(PrefetchTask(work = {
                 try {
-                    remote.chunk(index)
+                    remote.fetchRun(run.first(), run.size)
                 } catch (e: Throwable) {
-                    Log.d(TAG, "Prefetch failed for chunk $index", e)
+                    Log.d(TAG, "Prefetch failed for chunks ${run.first()}+${run.size}", e)
                 } finally {
-                    inFlight.remove(index)
+                    release()
                 }
-            }, onDrop = { inFlight.remove(index) }))
+            }, onDrop = release))
         } catch (e: RejectedExecutionException) {
-            // Prefetch queue is full (e.g. emulator scanning many files); skip it.
-            inFlight.remove(index)
+            release()
         }
     }
 
     private companion object {
         const val TAG = "StreamingFile"
-        const val READ_AHEAD = 32
+        const val READ_AHEAD = 64
+        const val RUN = 8
         const val JUMP_AHEAD = 2
         const val PLAYING_AFTER_READS = 50
     }

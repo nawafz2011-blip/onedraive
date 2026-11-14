@@ -18,9 +18,30 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
 
     fun chunkLength(index: Long): Long = minOf(CHUNK_SIZE, size - index * CHUNK_SIZE)
 
+    /**
+     * Downloads [count] consecutive chunks in one request and stores each in the cache.
+     * One 4 MB request is far faster than eight 512 KB ones: each request waits a full
+     * round trip to OneDrive before the first byte arrives.
+     */
+    fun fetchRun(first: Long, count: Int) {
+        val last = minOf(first + count, chunkCount) - 1
+        if (last < first) return
+        val start = first * CHUNK_SIZE
+        val data = downloadRange(start, last * CHUNK_SIZE + chunkLength(last) - 1)
+        for (index in first..last) {
+            val from = ((index - first) * CHUNK_SIZE).toInt()
+            val to = from + chunkLength(index).toInt()
+            if (to > data.size) break // short response: never cache a partial chunk
+            core.cache.put(key, index, data.copyOfRange(from, to))
+        }
+    }
+
     private fun download(index: Long): ByteArray {
         val start = index * CHUNK_SIZE
-        val end = start + chunkLength(index) - 1
+        return downloadRange(start, start + chunkLength(index) - 1)
+    }
+
+    private fun downloadRange(start: Long, end: Long): ByteArray {
         var lastError: Exception? = null
         // Ride out short network drops (about 10 s) instead of failing the emulator's read.
         repeat(6) { attempt ->
