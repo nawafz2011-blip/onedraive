@@ -6,3 +6,4 @@ local.properties
 *.jks
 *.keystore
 .DS_Store
+KEYSTORE_BASE64.txt

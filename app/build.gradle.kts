@@ -4,7 +4,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val keystoreFile: String? = System.getenv("KEYSTORE_FILE")
+val keystoreFile: String? = System.getenv("KEYSTORE_FILE")?.takeIf { it.isNotEmpty() }
+fun envOr(name: String, default: String) = System.getenv(name)?.takeIf { it.isNotEmpty() } ?: default
+// CI sets VERSION_CODE (100 + run number) so every build is newer than the last.
+val buildVersion = envOr("VERSION_CODE", "3").toInt()
 
 android {
     namespace = "com.cloudplay.bridge"
@@ -14,17 +17,18 @@ android {
         applicationId = "com.cloudplay.bridge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = buildVersion
+        versionName = "1.$buildVersion"
+        buildConfigField("String", "UPDATE_REPO", "\"${envOr("GITHUB_REPOSITORY", "nawafz2011-blip/onedraive")}\"")
     }
 
     signingConfigs {
         if (keystoreFile != null) {
             create("release") {
                 storeFile = file(keystoreFile)
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD")
+                storePassword = envOr("KEYSTORE_PASSWORD", "cloudplay")
+                keyAlias = envOr("KEY_ALIAS", "cloudplay")
+                keyPassword = envOr("KEY_PASSWORD", "cloudplay")
             }
         }
     }
@@ -42,7 +46,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
     lint { checkReleaseBuilds = false }
 }
 

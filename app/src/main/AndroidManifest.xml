@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <queries>
         <package android:name="com.github.stenzek.duckstation" />
@@ -47,6 +48,10 @@
                 <data android:scheme="cloudplay" android:host="auth" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".ui.UpdateReceiver"
+            android:exported="false" />
 
         <provider
             android:name=".provider.OneDriveProvider"

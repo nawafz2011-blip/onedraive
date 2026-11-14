@@ -34,6 +34,11 @@ jobs:
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
           echo "KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
+      - name: Set version
+        run: |
+          echo "VERSION_CODE=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "$((100 + GITHUB_RUN_NUMBER))" > version.txt
+
       - name: Build
         run: gradle assembleRelease --no-daemon --stacktrace
 
@@ -50,4 +55,6 @@ jobs:
           tag_name: latest
           name: CloudPlay (latest build)
           make_latest: true
-          files: CloudPlay.apk
+          files: |
+            CloudPlay.apk
+            version.txt

@@ -2,6 +2,9 @@ package com.cloudplay.bridge.ui
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -15,7 +18,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.cloudplay.bridge.core.ChunkCache.Companion.GB
 import com.cloudplay.bridge.core.Core
+import com.cloudplay.bridge.BuildConfig
 import com.cloudplay.bridge.core.Instance
+import com.cloudplay.bridge.core.Updater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -33,6 +38,7 @@ fun HomeScreen(core: Instance) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("ألعابي السحابية", style = MaterialTheme.typography.headlineSmall)
+        UpdateCard()
         if (signedIn) AccountCard(core) else SignInCard(core)
         CacheCard(core)
         HowToCard()
@@ -134,6 +140,86 @@ private fun CacheCard(core: Instance) {
             OutlinedButton(onClick = {
                 scope.launch(Dispatchers.IO) { core.cache.clear(); used = 0L }
             }) { Text("مسح الكاش") }
+        }
+    }
+}
+
+private sealed interface UpdateState {
+    data object Checking : UpdateState
+    data object UpToDate : UpdateState
+    data class Available(val version: Int) : UpdateState
+    data class Downloading(val progress: Float) : UpdateState
+    data object Installing : UpdateState
+    data class Failed(val message: String) : UpdateState
+}
+
+@Composable
+private fun UpdateCard() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf<UpdateState>(UpdateState.Checking) }
+
+    fun check() {
+        state = UpdateState.Checking
+        scope.launch {
+            state = try {
+                val latest = withContext(Dispatchers.IO) { Updater.latestVersion() }
+                if (latest > BuildConfig.VERSION_CODE) UpdateState.Available(latest) else UpdateState.UpToDate
+            } catch (e: Exception) {
+                UpdateState.Failed("ما قدرت أتحقق من التحديثات. تأكد من النت.")
+            }
+        }
+    }
+
+    fun update() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+            state = UpdateState.Failed("فعّل «السماح من هذا المصدر» لـ CloudPlay، وارجع اضغط تحديث مرة ثانية.")
+            context.startActivity(
+                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+            )
+            return
+        }
+        state = UpdateState.Downloading(0f)
+        scope.launch {
+            state = try {
+                val apk = withContext(Dispatchers.IO) {
+                    Updater.download(context) { p -> state = UpdateState.Downloading(p) }
+                }
+                withContext(Dispatchers.IO) { Updater.install(context, apk) }
+                UpdateState.Installing
+            } catch (e: Exception) {
+                UpdateState.Failed("فشل تنزيل التحديث. تأكد من النت وجرب مرة ثانية.")
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { check() }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("التحديثات · نسختك ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium)
+            when (val s = state) {
+                UpdateState.Checking -> Text("جاري التحقق...", style = MaterialTheme.typography.bodySmall)
+                UpdateState.UpToDate -> {
+                    Text("عندك آخر نسخة.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = { check() }) { Text("تحقق مرة ثانية") }
+                }
+                is UpdateState.Available -> {
+                    Text("فيه تحديث جديد! بياناتك والـ Client ID بتبقى مثل ما هي.",
+                        style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = { update() }, modifier = Modifier.fillMaxWidth()) { Text("تحديث") }
+                }
+                is UpdateState.Downloading -> {
+                    Text("جاري التنزيل...", style = MaterialTheme.typography.bodySmall)
+                    LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth())
+                }
+                UpdateState.Installing ->
+                    Text("اضغط «تحديث» أو «تثبيت» في الرسالة اللي بتطلع لك.", style = MaterialTheme.typography.bodySmall)
+                is UpdateState.Failed -> {
+                    Text(s.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    OutlinedButton(onClick = { check() }) { Text("حاول مرة ثانية") }
+                }
+            }
         }
     }
 }
