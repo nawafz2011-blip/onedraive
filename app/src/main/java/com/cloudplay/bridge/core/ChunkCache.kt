@@ -35,18 +35,18 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
     }
 
     /** Stores a chunk fetched ahead of time (no-op if it's already cached). */
-    fun put(key: String, index: Long, data: ByteArray) {
+    fun put(key: String, index: Long, data: ByteArray, offset: Int = 0, length: Int = data.size) {
         val target = file(key, index)
         if (target.exists()) return
         val lock = locks.computeIfAbsent(target.name) { Any() }
-        synchronized(lock) { if (!target.exists()) write(target, data) }
+        synchronized(lock) { if (!target.exists()) write(target, data, offset, length) }
         locks.remove(target.name)
         afterWrite()
     }
 
-    private fun write(target: File, bytes: ByteArray) {
+    private fun write(target: File, bytes: ByteArray, offset: Int = 0, length: Int = bytes.size) {
         val tmp = File(dir, target.name + "." + Thread.currentThread().id + ".tmp")
-        tmp.writeBytes(bytes)
+        tmp.outputStream().use { it.write(bytes, offset, length) }
         if (!tmp.renameTo(target)) tmp.delete()
     }
 

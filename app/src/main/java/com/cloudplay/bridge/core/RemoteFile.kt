@@ -20,7 +20,7 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
 
     /**
      * Downloads [count] consecutive chunks in one request and stores each in the cache.
-     * One 4 MB request is far faster than eight 512 KB ones: each request waits a full
+     * One big request is far faster than many 512 KB ones: each request waits a full
      * round trip to OneDrive before the first byte arrives.
      */
     fun fetchRun(first: Long, count: Int) {
@@ -32,7 +32,7 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
             val from = ((index - first) * CHUNK_SIZE).toInt()
             val to = from + chunkLength(index).toInt()
             if (to > data.size) break // short response: never cache a partial chunk
-            core.cache.put(key, index, data.copyOfRange(from, to))
+            core.cache.put(key, index, data, from, to - from)
         }
     }
 

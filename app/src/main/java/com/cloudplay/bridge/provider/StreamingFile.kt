@@ -78,16 +78,22 @@ class StreamingFile(
 
     private fun chunk(index: Long): ByteArray {
         if (index == lastIndex) lastData?.let { return it }
+        // Already coming in a read-ahead request: wait for it instead of downloading it twice.
+        val deadline = System.currentTimeMillis() + 15_000
+        while (index in inFlight && !core.cache.has(remote.key, index) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(15)
+        }
         val bytes = remote.chunk(index)
         lastIndex = index
         lastData = bytes
         return bytes
     }
 
-    /** Queues the missing chunks of [from, from + count) as runs of up to [RUN] chunks per request. */
+    /** Queues the missing chunks of [from, from + count) as runs of up to [RUN] chunks (8 MB) per request. */
     private fun prefetchWindow(from: Long, count: Int) {
         val end = minOf(from + count, remote.chunkCount)
         var i = from
+        val runs = mutableListOf<List<Long>>()
         while (i < end) {
             if (i in inFlight || core.cache.has(remote.key, i)) {
                 i++
@@ -98,8 +104,10 @@ class StreamingFile(
                 run += i
                 i++
             }
-            if (run.isEmpty()) i++ else submit(run)
+            if (run.isEmpty()) i++ else runs += run
         }
+        // The queue serves newest first, so submit the farthest run first and the nearest last.
+        runs.asReversed().forEach { submit(it) }
     }
 
     private fun submit(run: List<Long>) {
@@ -121,8 +129,8 @@ class StreamingFile(
 
     private companion object {
         const val TAG = "StreamingFile"
-        const val READ_AHEAD = 64
-        const val RUN = 8
+        const val READ_AHEAD = 128
+        const val RUN = 16
         const val JUMP_AHEAD = 2
         const val PLAYING_AFTER_READS = 50
     }
