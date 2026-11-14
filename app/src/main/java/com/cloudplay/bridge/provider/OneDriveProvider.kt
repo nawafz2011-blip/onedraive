@@ -17,13 +17,17 @@ import com.cloudplay.bridge.core.DriveItem
 import com.cloudplay.bridge.core.GraphClient.Companion.ROOT_ID
 import com.cloudplay.bridge.core.Instance
 import java.io.FileNotFoundException
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 class OneDriveProvider : DocumentsProvider() {
 
     private val core: Instance by lazy { Core.get(context!!) }
-    private val prefetcher = Executors.newFixedThreadPool(2)
+    // Bounded queue: when an emulator scans a whole folder, read-ahead requests would
+    // otherwise pile up without limit and compete with the reads it is waiting on.
+    private val prefetcher = ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS, ArrayBlockingQueue(4))
     private val parents = ConcurrentHashMap<String, String>()
     private val items = ConcurrentHashMap<String, DriveItem>()
     private val listings = ConcurrentHashMap<String, Pair<Long, List<DriveItem>>>()
@@ -110,11 +114,18 @@ class OneDriveProvider : DocumentsProvider() {
         if (item.isFolder) throw FileNotFoundException("${item.name} is a folder")
         val thread = HandlerThread("cloudplay-${item.name}").apply { start() }
         val storage = context!!.getSystemService(StorageManager::class.java)
-        return storage.openProxyFileDescriptor(
-            ParcelFileDescriptor.MODE_READ_ONLY,
-            StreamingFile(core, item, prefetcher, thread),
-            Handler(thread.looper),
-        )
+        return try {
+            storage.openProxyFileDescriptor(
+                ParcelFileDescriptor.MODE_READ_ONLY,
+                StreamingFile(core, item, prefetcher, thread),
+                Handler(thread.looper),
+            )
+        } catch (e: Exception) {
+            // Anything other than FileNotFoundException is re-thrown inside the
+            // emulator as a RuntimeException and can crash it.
+            thread.quitSafely()
+            throw FileNotFoundException("Couldn't open ${item.name}: ${e.message}")
+        }
     }
 
     private fun fetchItem(id: String): DriveItem = try {

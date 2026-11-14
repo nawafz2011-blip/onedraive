@@ -12,6 +12,7 @@ import com.cloudplay.bridge.core.Instance
 import java.io.IOException
 import java.util.Collections
 import java.util.concurrent.ExecutorService
+import java.util.concurrent.RejectedExecutionException
 
 class StreamingFile(
     private val core: Instance,
@@ -51,8 +52,12 @@ class StreamingFile(
             prefetch(index + 1)
             prefetch(index + 2)
             return done
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Any error (including OutOfMemoryError) must become EIO: an uncaught
+            // throwable here kills CloudPlay, and Android then kills the emulator too.
             Log.w(TAG, "Read failed for ${item.name} at $offset", e)
+            lastData = null
+            lastIndex = -1L
             throw ErrnoException("onRead", OsConstants.EIO)
         }
     }
@@ -72,14 +77,19 @@ class StreamingFile(
 
     private fun prefetch(index: Long) {
         if (index * CHUNK_SIZE >= size || core.cache.has(key, index) || !inFlight.add(index)) return
-        prefetcher.execute {
-            try {
-                core.cache.get(key, index) { download(index) }
-            } catch (e: Exception) {
-                Log.d(TAG, "Prefetch failed for chunk $index", e)
-            } finally {
-                inFlight.remove(index)
+        try {
+            prefetcher.execute {
+                try {
+                    core.cache.get(key, index) { download(index) }
+                } catch (e: Throwable) {
+                    Log.d(TAG, "Prefetch failed for chunk $index", e)
+                } finally {
+                    inFlight.remove(index)
+                }
             }
+        } catch (e: RejectedExecutionException) {
+            // Prefetch queue is full (e.g. emulator scanning many files); skip it.
+            inFlight.remove(index)
         }
     }
 
