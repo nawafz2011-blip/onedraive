@@ -6,6 +6,7 @@ import android.system.ErrnoException
 import android.system.OsConstants
 import android.util.Log
 import com.cloudplay.bridge.core.ChunkCache.Companion.CHUNK_SIZE
+import com.cloudplay.bridge.core.Diag
 import com.cloudplay.bridge.core.DriveItem
 import com.cloudplay.bridge.core.Instance
 import com.cloudplay.bridge.core.RemoteFile
@@ -48,6 +49,8 @@ class StreamingFile(
     override fun onRead(offset: Long, length: Int, data: ByteArray): Int {
         if (offset >= size) return 0
         val total = minOf(length.toLong(), size - offset).toInt()
+        Diag.reads.incrementAndGet()
+        Diag.readBytes.addAndGet(total.toLong())
         try {
             var done = 0
             var index = offset / CHUNK_SIZE
@@ -66,6 +69,7 @@ class StreamingFile(
             // (Zelda, resource packs) jump constantly; a big window at every jump floods the
             // connection with data nobody reads and the chunk the game needs arrives last.
             if (index != lastReadIndex) {
+                if (index != lastReadIndex + 1) Diag.log("JUMP ${item.name.take(24)} $lastReadIndex->$index len=$length")
                 streak = if (index == lastReadIndex + 1) streak + 1 else 0
                 lastReadIndex = index
                 position = index
@@ -92,10 +96,19 @@ class StreamingFile(
         if (index == lastIndex) lastData?.let { return it }
         val blocking = !isCached(index)
         if (blocking) Stats.waiting.incrementAndGet()
+        val t0 = System.currentTimeMillis()
+        val queued = index in inFlight
+        val active = index in downloading
         try {
             return load(index)
         } finally {
-            if (blocking) Stats.waiting.decrementAndGet()
+            if (blocking) {
+                Stats.waiting.decrementAndGet()
+                val ms = System.currentTimeMillis() - t0
+                Diag.misses.incrementAndGet()
+                Diag.missMs.addAndGet(ms)
+                if (ms > 150) Diag.log("MISS $index ${ms}ms queued=$queued downloading=$active")
+            }
         }
     }
 
@@ -146,12 +159,15 @@ class StreamingFile(
             prefetcher.execute(PrefetchTask(work = work@{
                 // The emulator has moved on: this data is no longer the next thing it needs.
                 if (run.last() < position || run.first() > position + READ_AHEAD) {
+                    Diag.log("SKIP ${run.first()}+${run.size} pos=$position")
                     release()
                     return@work
                 }
                 downloading.addAll(run)
+                val t0 = System.currentTimeMillis()
                 try {
                     remote.fetchRun(run.first(), run.size)
+                    Diag.log("RUN ${run.first()}+${run.size} ${System.currentTimeMillis() - t0}ms")
                 } catch (e: Throwable) {
                     Log.d(TAG, "Prefetch failed for chunks ${run.first()}+${run.size}", e)
                 } finally {

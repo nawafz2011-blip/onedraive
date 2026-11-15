@@ -46,6 +46,7 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
                     }
                 }
             } catch (e: ExpiredLinkException) {
+                Diag.log("EXPIRED link ${item.name.take(24)}")
                 downloadUrl = null
                 lastError = e
                 attempt++
@@ -58,6 +59,7 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
         if (next <= last) {
             val error = lastError ?: IOException("Download failed")
             Stats.error("${item.name}: ${error.message}")
+        Diag.log("ERR ${item.name.take(24)}: ${error.javaClass.simpleName} ${error.message}")
             throw error
         }
     }
@@ -82,8 +84,16 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
         repeat(6) { attempt ->
             try {
                 val url = downloadUrl ?: refreshUrl()
-                return core.graph.readRange(url, start, end).also { Stats.bytes.addAndGet(it.size.toLong()) }
+                val t0 = System.currentTimeMillis()
+                return core.graph.readRange(url, start, end).also {
+                    val ms = System.currentTimeMillis() - t0
+                    Stats.bytes.addAndGet(it.size.toLong())
+                    Diag.requests.incrementAndGet()
+                    Diag.requestMs.addAndGet(ms)
+                    if (ms > 800) Diag.log("SLOW GET ${start / CHUNK_SIZE} ${it.size / 1024}KB ${ms}ms")
+                }
             } catch (e: ExpiredLinkException) {
+                Diag.log("EXPIRED link ${item.name.take(24)}")
                 downloadUrl = null
                 lastError = e
             } catch (e: IOException) {
@@ -93,6 +103,7 @@ class RemoteFile(private val core: Instance, val item: DriveItem) {
         }
         val error = lastError ?: IOException("Download failed")
         Stats.error("${item.name}: ${error.message}")
+        Diag.log("ERR ${item.name.take(24)}: ${error.javaClass.simpleName} ${error.message}")
         throw error
     }
 

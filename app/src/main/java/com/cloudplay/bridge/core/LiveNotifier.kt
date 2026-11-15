@@ -43,6 +43,7 @@ object LiveNotifier {
                     } else {
                         idleSince = 0L
                     }
+                    if (Stats.openFiles.get() > 0) Diag.summary()
                     manager.notify(ID, build(app, speed, now))
                 }
             } catch (e: Exception) {

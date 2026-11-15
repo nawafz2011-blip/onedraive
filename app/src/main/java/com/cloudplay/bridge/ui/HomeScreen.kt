@@ -252,6 +252,8 @@ private fun ActivityCard() {
                 Text("أخطاء: $errors", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                 lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
+            val context = LocalContext.current
+            OutlinedButton(onClick = { shareDiagnostics(context) }) { Text("إرسال سجل التشخيص") }
         }
     }
 }
@@ -272,4 +274,16 @@ private fun HowToCard() {
 internal fun formatBytes(bytes: Long): String = when {
     bytes >= GB -> String.format(Locale.US, "%.1f جيقا", bytes.toDouble() / GB)
     else -> String.format(Locale.US, "%d ميقا", bytes / (1024 * 1024))
+}
+
+private fun shareDiagnostics(context: android.content.Context) {
+    val dir = java.io.File(context.cacheDir, "diag").apply { mkdirs() }
+    val file = java.io.File(dir, "cloudplay-log.txt")
+    file.writeText(com.cloudplay.bridge.core.Diag.dump(BuildConfig.VERSION_NAME))
+    val uri = androidx.core.content.FileProvider.getUriForFile(context, "com.cloudplay.bridge.files", file)
+    val send = Intent(Intent.ACTION_SEND)
+        .setType("text/plain")
+        .putExtra(Intent.EXTRA_STREAM, uri)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    context.startActivity(Intent.createChooser(send, "إرسال سجل التشخيص"))
 }

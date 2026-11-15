@@ -13,6 +13,7 @@ import android.provider.DocumentsProvider
 import android.webkit.MimeTypeMap
 import com.cloudplay.bridge.R
 import com.cloudplay.bridge.core.Core
+import com.cloudplay.bridge.core.Diag
 import com.cloudplay.bridge.core.DriveItem
 import com.cloudplay.bridge.core.GraphClient.Companion.ROOT_ID
 import com.cloudplay.bridge.core.Instance
@@ -28,6 +29,7 @@ class OneDriveProvider : DocumentsProvider() {
     // Bounded queue: when an emulator scans a whole folder, read-ahead requests would
     // otherwise pile up without limit and compete with the reads it is waiting on.
     private val prefetcher = ThreadPoolExecutor(8, 8, 0L, TimeUnit.MILLISECONDS, PrefetchQueue(256))
+        .also { Diag.pool = it }
     private val parents = ConcurrentHashMap<String, String>()
     private val items = ConcurrentHashMap<String, DriveItem>()
     private val itemTimes = ConcurrentHashMap<String, Long>()
@@ -120,6 +122,7 @@ class OneDriveProvider : DocumentsProvider() {
         if (item.isFolder) throw FileNotFoundException("${item.name} is a folder")
         val thread = HandlerThread("cloudplay-${item.name}").apply { start() }
         LiveNotifier.start(context!!)
+        Diag.log("OPEN ${item.name.take(40)} ${item.size / 1048576}MB")
         val storage = context!!.getSystemService(StorageManager::class.java)
         return try {
             storage.openProxyFileDescriptor(
