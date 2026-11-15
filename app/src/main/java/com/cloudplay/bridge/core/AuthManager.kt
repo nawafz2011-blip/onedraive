@@ -17,7 +17,11 @@ class NotSignedInException : IOException("Not signed in to OneDrive")
 
 class AuthManager(context: Context, private val settings: Settings) {
     private val store = SecureStore(context)
-    private val http = OkHttpClient()
+    private val http = OkHttpClient.Builder()
+        .dns(CachingDns)
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
     private val random = SecureRandom()
 
     private val _signedIn = MutableStateFlow(store.get(KEY_REFRESH) != null)

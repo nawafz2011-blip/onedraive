@@ -122,6 +122,7 @@ class OneDriveProvider : DocumentsProvider() {
         if (item.isFolder) throw FileNotFoundException("${item.name} is a folder")
         val thread = HandlerThread("cloudplay-${item.name}").apply { start() }
         LiveNotifier.start(context!!)
+        com.cloudplay.bridge.service.StreamService.start(context!!)
         Diag.log("OPEN ${item.name.take(40)} ${item.size / 1048576}MB")
         val storage = context!!.getSystemService(StorageManager::class.java)
         return try {

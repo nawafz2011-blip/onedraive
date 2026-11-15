@@ -33,7 +33,10 @@ object LiveNotifier {
             var idleSince = 0L
             try {
                 while (true) {
+                    val before = System.currentTimeMillis()
                     Thread.sleep(1000)
+                    val slept = System.currentTimeMillis() - before
+                    if (slept > 5000) Diag.log("GAP ${slept / 1000}s: CloudPlay was paused by the system")
                     val now = Stats.bytes.get()
                     val speed = now - last
                     last = now
