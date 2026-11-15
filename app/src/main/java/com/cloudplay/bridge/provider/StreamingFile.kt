@@ -27,6 +27,9 @@ class StreamingFile(
     private val size = item.size
     private val inFlight = Collections.synchronizedSet(mutableSetOf<Long>())
 
+    // Chunks whose read-ahead request is actually downloading (not just queued).
+    private val downloading = Collections.synchronizedSet(mutableSetOf<Long>())
+
     private var lastIndex = -1L
     private var lastData: ByteArray? = null
     private var lastReadIndex = -2L
@@ -35,9 +38,6 @@ class StreamingFile(
     // Chunks known to be on disk, so hot paths skip a file-system check per chunk.
     private val known = BitSet()
 
-    // Read-ahead already queued for [windowStart, horizon); only new chunks are scanned.
-    private var windowStart = -1L
-    private var horizon = -1L
 
     override fun onGetSize(): Long = size
 
@@ -98,9 +98,10 @@ class StreamingFile(
     }
 
     private fun load(index: Long): ByteArray {
-        // Already coming in a read-ahead request: wait for it instead of downloading it twice.
-        val deadline = System.currentTimeMillis() + 15_000
-        while (index in inFlight && !core.cache.has(remote.key, index) && System.currentTimeMillis() < deadline) {
+        // Already downloading in a read-ahead request: it lands within moments, so wait for it.
+        // A request that is only queued may sit behind others, so fetch the chunk right away.
+        val deadline = System.currentTimeMillis() + 3_000
+        while (index in downloading && !core.cache.has(remote.key, index) && System.currentTimeMillis() < deadline) {
             Thread.sleep(15)
         }
         val bytes = remote.chunk(index)
@@ -113,10 +114,7 @@ class StreamingFile(
     /** Queues the missing chunks of [from, from + count) as runs of up to [RUN] chunks (8 MB) per request. */
     private fun prefetchWindow(from: Long, count: Int) {
         val end = minOf(from + count, remote.chunkCount)
-        // Moving forward inside the window already queued: only look at the new chunks.
-        var i = if (from in windowStart..horizon) maxOf(from, horizon) else from
-        windowStart = from
-        horizon = maxOf(end, if (i == from) end else horizon)
+        var i = from
         val runs = mutableListOf<List<Long>>()
         while (i < end) {
             if (i in inFlight || isCached(i)) {
@@ -144,11 +142,13 @@ class StreamingFile(
         val release = { run.forEach { inFlight.remove(it) } }
         try {
             prefetcher.execute(PrefetchTask(work = {
+                downloading.addAll(run)
                 try {
                     remote.fetchRun(run.first(), run.size)
                 } catch (e: Throwable) {
                     Log.d(TAG, "Prefetch failed for chunks ${run.first()}+${run.size}", e)
                 } finally {
+                    downloading.removeAll(run.toSet())
                     release()
                 }
             }, onDrop = release))
