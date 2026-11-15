@@ -19,6 +19,7 @@ android {
         targetSdk = 35
         versionCode = buildVersion
         versionName = "1.$buildVersion"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "UPDATE_REPO", "\"${envOr("GITHUB_REPOSITORY", "nawafz2011-blip/onedraive")}\"")
     }
 
@@ -62,4 +63,6 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
