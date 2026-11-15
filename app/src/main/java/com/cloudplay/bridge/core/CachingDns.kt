@@ -16,6 +16,8 @@ object CachingDns : Dns {
     private val cache = ConcurrentHashMap<String, Pair<Long, List<InetAddress>>>()
     private val locks = ConcurrentHashMap<String, Any>()
 
+    fun clear() = cache.clear()
+
     override fun lookup(hostname: String): List<InetAddress> {
         fresh(hostname)?.let { return it }
         synchronized(locks.computeIfAbsent(hostname) { Any() }) {

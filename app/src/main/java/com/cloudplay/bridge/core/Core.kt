@@ -1,6 +1,8 @@
 package com.cloudplay.bridge.core
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import android.provider.DocumentsContract
 import java.io.File
 
@@ -25,7 +27,18 @@ object Core {
 class Instance(context: Context) {
     val settings = Settings(context)
     val auth = AuthManager(context, settings)
-    val graph = GraphClient(auth)
+    val graph = GraphClient(auth).also { graph ->
+        val connectivity = context.getSystemService(ConnectivityManager::class.java)
+        var current: Network? = connectivity.activeNetwork
+        connectivity.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                if (network != current) graph.onNetworkChanged()
+                current = network
+            }
+
+            override fun onLost(network: Network) = graph.onNetworkChanged()
+        })
+    }
     // Folder name tracks CHUNK_SIZE: chunks of a different size must never be mixed.
     // In filesDir, not cacheDir: Android may wipe cacheDir and lose prepared games.
     val cache = ChunkCache(File(context.filesDir, "chunks-512k"), settings).also {
