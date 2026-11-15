@@ -135,7 +135,7 @@ class StreamingFile(
         return bytes
     }
 
-    /** Queues the missing chunks of [from, from + count) as runs of up to [RUN] chunks (4 MB) per request. */
+    /** Queues the missing chunks of [from, from + count) as runs of up to [RUN] chunks (2 MB) per request. */
     private fun prefetchWindow(from: Long, count: Int) {
         val end = minOf(from + count, remote.chunkCount)
         var i = from
@@ -192,7 +192,7 @@ class StreamingFile(
     private companion object {
         const val TAG = "StreamingFile"
         const val READ_AHEAD = 64
-        const val RUN = 8
+        const val RUN = 4
         const val JUMP_AHEAD = 4
         const val SEQUENTIAL_AFTER = 3
     }
