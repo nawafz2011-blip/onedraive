@@ -74,7 +74,7 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
         var total = files.sumOf { it.length() }
         val max = maxBytes()
         if (total <= max) return
-        for (f in files.sortedBy { it.lastModified() }) {
+        for (f in files.map { it to it.lastModified() }.sortedBy { it.second }.map { it.first }) {
             if (total <= max) break
             val len = f.length()
             if (f.delete()) total -= len

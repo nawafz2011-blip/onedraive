@@ -33,7 +33,11 @@ class StreamingFile(
     private var lastIndex = -1L
     private var lastData: ByteArray? = null
     private var lastReadIndex = -2L
-    private var reads = 0
+    private var streak = 0
+
+    // Where the emulator is reading now; read-ahead for spots it has left is skipped.
+    @Volatile
+    private var position = 0L
 
     // Chunks known to be on disk, so hot paths skip a file-system check per chunk.
     private val known = BitSet()
@@ -57,17 +61,15 @@ class StreamingFile(
                 System.arraycopy(chunk, within, data, done, n)
                 done += n
             }
-            // Read far ahead while the emulator reads straight through the file (loading a
-            // game); only a little after a jump, so scanning headers doesn't waste bandwidth.
-            // Once the file has been read many times it's a running game, not a folder scan:
-            // games read lots of small pieces scattered through the file (e.g. resource packs),
-            // so fetch a wide window after every read instead of waiting on each piece.
-            reads++
+            // Read far ahead only once the emulator has been reading straight through the file
+            // for a few chunks. Games that read many small files scattered through the image
+            // (Zelda, resource packs) jump constantly; a big window at every jump floods the
+            // connection with data nobody reads and the chunk the game needs arrives last.
             if (index != lastReadIndex) {
-                val sequential = index in lastReadIndex - 1..lastReadIndex + 2
+                streak = if (index == lastReadIndex + 1) streak + 1 else 0
                 lastReadIndex = index
-                val ahead = if (sequential || reads > PLAYING_AFTER_READS) READ_AHEAD else JUMP_AHEAD
-                prefetchWindow(index + 1, ahead)
+                position = index
+                prefetchWindow(index + 1, if (streak >= SEQUENTIAL_AFTER) READ_AHEAD else JUMP_AHEAD)
             }
             return done
         } catch (e: Throwable) {
@@ -111,7 +113,7 @@ class StreamingFile(
         return bytes
     }
 
-    /** Queues the missing chunks of [from, from + count) as runs of up to [RUN] chunks (8 MB) per request. */
+    /** Queues the missing chunks of [from, from + count) as runs of up to [RUN] chunks (4 MB) per request. */
     private fun prefetchWindow(from: Long, count: Int) {
         val end = minOf(from + count, remote.chunkCount)
         var i = from
@@ -141,7 +143,12 @@ class StreamingFile(
     private fun submit(run: List<Long>) {
         val release = { run.forEach { inFlight.remove(it) } }
         try {
-            prefetcher.execute(PrefetchTask(work = {
+            prefetcher.execute(PrefetchTask(work = work@{
+                // The emulator has moved on: this data is no longer the next thing it needs.
+                if (run.last() < position || run.first() > position + READ_AHEAD) {
+                    release()
+                    return@work
+                }
                 downloading.addAll(run)
                 try {
                     remote.fetchRun(run.first(), run.size)
@@ -159,9 +166,9 @@ class StreamingFile(
 
     private companion object {
         const val TAG = "StreamingFile"
-        const val READ_AHEAD = 128
-        const val RUN = 16
-        const val JUMP_AHEAD = 2
-        const val PLAYING_AFTER_READS = 50
+        const val READ_AHEAD = 64
+        const val RUN = 8
+        const val JUMP_AHEAD = 4
+        const val SEQUENTIAL_AFTER = 3
     }
 }

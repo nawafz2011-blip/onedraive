@@ -29,7 +29,7 @@ class GraphClient(private val auth: AuthManager) {
         // A stalled connection (often a dead one after switching Wi-Fi/mobile data) must fail
         // fast so the read is retried on a fresh connection, not hold the game for a minute.
         .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .pingInterval(5, TimeUnit.SECONDS)
         // Enough warm connections for all read-ahead threads, so each chunk skips a new TLS handshake.
         .connectionPool(ConnectionPool(32, 5, TimeUnit.MINUTES))

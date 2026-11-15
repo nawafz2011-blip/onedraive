@@ -27,7 +27,7 @@ class OneDriveProvider : DocumentsProvider() {
     private val core: Instance by lazy { Core.get(context!!) }
     // Bounded queue: when an emulator scans a whole folder, read-ahead requests would
     // otherwise pile up without limit and compete with the reads it is waiting on.
-    private val prefetcher = ThreadPoolExecutor(16, 16, 0L, TimeUnit.MILLISECONDS, PrefetchQueue(256))
+    private val prefetcher = ThreadPoolExecutor(8, 8, 0L, TimeUnit.MILLISECONDS, PrefetchQueue(256))
     private val parents = ConcurrentHashMap<String, String>()
     private val items = ConcurrentHashMap<String, DriveItem>()
     private val itemTimes = ConcurrentHashMap<String, Long>()
