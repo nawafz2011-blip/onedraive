@@ -39,7 +39,7 @@ class GraphClient(private val auth: AuthManager) {
     /** The phone moved to another network: pooled connections are dead, drop them. */
     fun onNetworkChanged() {
         http.connectionPool.evictAll()
-        CachingDns.clear()
+        CachingDns.expire()
     }
 
     fun item(id: String): DriveItem = parse(getJson("$BASE/items/${enc(id)}"))
