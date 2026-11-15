@@ -1,6 +1,9 @@
 package com.cloudplay.bridge.core
 
 import java.io.File
+import java.io.RandomAccessFile
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.util.concurrent.ConcurrentHashMap
 
 class ChunkCache(private val dir: File, private val settings: Settings) {
@@ -19,6 +22,67 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
     }
 
     fun has(key: String, index: Long) = file(key, index).exists()
+
+    // Open chunk files, so a small read of a cached chunk is one positional read
+    // instead of loading the whole 512 KB chunk.
+    private val channels = object : LinkedHashMap<String, FileChannel>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, FileChannel>?): Boolean {
+            if (size <= OPEN_CHANNELS) return false
+            runCatching { eldest?.value?.close() }
+            return true
+        }
+    }
+
+    /**
+     * Copies [length] bytes at [within] of a cached chunk into [dest]. Returns the bytes copied,
+     * or -1 if the chunk isn't cached. Reads only what was asked, from RAM or disk.
+     */
+    fun readInto(key: String, index: Long, within: Int, dest: ByteArray, destOffset: Int, length: Int): Int {
+        val name = prefix(key) + index
+        synchronized(memory) { memory[name] }?.let { chunk ->
+            val n = minOf(length, chunk.size - within)
+            if (n <= 0) return -1
+            System.arraycopy(chunk, within, dest, destOffset, n)
+            return n
+        }
+        val channel = synchronized(channels) {
+            channels[name] ?: run {
+                val f = File(dir, name)
+                if (!f.exists()) return -1
+                val now = System.currentTimeMillis()
+                if (now - f.lastModified() > TOUCH_INTERVAL_MS) f.setLastModified(now)
+                try {
+                    RandomAccessFile(f, "r").channel.also { channels[name] = it }
+                } catch (e: Exception) {
+                    return -1
+                }
+            }
+        }
+        return try {
+            val buffer = ByteBuffer.wrap(dest, destOffset, length)
+            var done = 0
+            while (buffer.hasRemaining()) {
+                val n = channel.read(buffer, (within + done).toLong())
+                if (n <= 0) break
+                done += n
+            }
+            if (done > 0) done else -1
+        } catch (e: Exception) {
+            synchronized(channels) { channels.remove(name) }
+            -1
+        }
+    }
+
+    private fun closeChannels(match: (String) -> Boolean) = synchronized(channels) {
+        val it = channels.entries.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            if (match(e.key)) {
+                runCatching { e.value.close() }
+                it.remove()
+            }
+        }
+    }
 
     fun get(key: String, index: Long, fetch: () -> ByteArray): ByteArray {
         val target = file(key, index)
@@ -76,6 +140,7 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
         if (total <= max) return
         for (f in files.map { it to it.lastModified() }.sortedBy { it.second }.map { it.first }) {
             if (total <= max) break
+            closeChannels { it == f.name }
             val len = f.length()
             if (f.delete()) total -= len
         }
@@ -85,6 +150,7 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
     @Synchronized
     fun clear() {
         synchronized(memory) { memory.clear() }
+        closeChannels { true }
         val pinned = settings.pinned.map { prefix(it.key) }
         dir.listFiles()?.filter { f -> pinned.none { f.name.startsWith(it) } }?.forEach { it.delete() }
     }
@@ -93,6 +159,7 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
     fun removeKey(key: String) {
         val p = prefix(key)
         synchronized(memory) { memory.keys.removeAll { it.startsWith(p) } }
+        closeChannels { it.startsWith(p) }
         dir.listFiles { f -> f.name.startsWith(p) }?.forEach { it.delete() }
     }
 
@@ -125,6 +192,7 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
         const val CHUNK_SIZE = 512L * 1024
         private val UNSAFE = Regex("[^A-Za-z0-9]")
         private const val TOUCH_INTERVAL_MS = 10 * 60_000L
+        private const val OPEN_CHANNELS = 128
         private const val MEMORY_CHUNKS = 64
         const val GB = 1024L * 1024 * 1024
     }

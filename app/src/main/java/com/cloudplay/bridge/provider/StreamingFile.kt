@@ -57,8 +57,17 @@ class StreamingFile(
             while (done < total) {
                 val pos = offset + done
                 index = pos / CHUNK_SIZE
-                val chunk = chunk(index)
                 val within = (pos - index * CHUNK_SIZE).toInt()
+                val want = minOf(total - done, (remote.chunkLength(index) - within).toInt())
+                // Cached: copy just the requested bytes, without loading the whole chunk.
+                if (index != lastIndex && isCached(index)) {
+                    val got = core.cache.readInto(remote.key, index, within, data, done, want)
+                    if (got > 0) {
+                        done += got
+                        continue
+                    }
+                }
+                val chunk = chunk(index)
                 val n = minOf(total - done, chunk.size - within)
                 if (n <= 0) throw IOException("Short chunk $index")
                 System.arraycopy(chunk, within, data, done, n)
