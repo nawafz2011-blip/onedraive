@@ -104,19 +104,27 @@ class ChunkCache(private val dir: File, private val settings: Settings) {
     private fun readIfPresent(f: File): ByteArray? {
         if (!f.exists()) return null
         return try {
-            f.setLastModified(System.currentTimeMillis())
+            // Touching the date is a disk write; do it at most every 10 minutes per chunk,
+            // which is plenty for least-recently-used eviction.
+            val now = System.currentTimeMillis()
+            if (now - f.lastModified() > TOUCH_INTERVAL_MS) f.setLastModified(now)
             f.readBytes()
         } catch (e: Exception) {
             null
         }
     }
 
-    private fun prefix(key: String) = key.replace(Regex("[^A-Za-z0-9]"), "_") + "_"
+    private val prefixes = ConcurrentHashMap<String, String>()
+
+    private fun prefix(key: String) =
+        prefixes.getOrPut(key) { key.replace(UNSAFE, "_") + "_" }
 
     private fun file(key: String, index: Long) = File(dir, prefix(key) + index)
 
     companion object {
         const val CHUNK_SIZE = 512L * 1024
+        private val UNSAFE = Regex("[^A-Za-z0-9]")
+        private const val TOUCH_INTERVAL_MS = 10 * 60_000L
         private const val MEMORY_CHUNKS = 64
         const val GB = 1024L * 1024 * 1024
     }

@@ -11,6 +11,7 @@ import com.cloudplay.bridge.core.Instance
 import com.cloudplay.bridge.core.RemoteFile
 import com.cloudplay.bridge.core.Stats
 import java.io.IOException
+import java.util.BitSet
 import java.util.Collections
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.RejectedExecutionException
@@ -30,6 +31,13 @@ class StreamingFile(
     private var lastData: ByteArray? = null
     private var lastReadIndex = -2L
     private var reads = 0
+
+    // Chunks known to be on disk, so hot paths skip a file-system check per chunk.
+    private val known = BitSet()
+
+    // Read-ahead already queued for [windowStart, horizon); only new chunks are scanned.
+    private var windowStart = -1L
+    private var horizon = -1L
 
     override fun onGetSize(): Long = size
 
@@ -80,7 +88,7 @@ class StreamingFile(
 
     private fun chunk(index: Long): ByteArray {
         if (index == lastIndex) lastData?.let { return it }
-        val blocking = !core.cache.has(remote.key, index)
+        val blocking = !isCached(index)
         if (blocking) Stats.waiting.incrementAndGet()
         try {
             return load(index)
@@ -96,6 +104,7 @@ class StreamingFile(
             Thread.sleep(15)
         }
         val bytes = remote.chunk(index)
+        known.set(index.toInt())
         lastIndex = index
         lastData = bytes
         return bytes
@@ -104,15 +113,18 @@ class StreamingFile(
     /** Queues the missing chunks of [from, from + count) as runs of up to [RUN] chunks (8 MB) per request. */
     private fun prefetchWindow(from: Long, count: Int) {
         val end = minOf(from + count, remote.chunkCount)
-        var i = from
+        // Moving forward inside the window already queued: only look at the new chunks.
+        var i = if (from in windowStart..horizon) maxOf(from, horizon) else from
+        windowStart = from
+        horizon = maxOf(end, if (i == from) end else horizon)
         val runs = mutableListOf<List<Long>>()
         while (i < end) {
-            if (i in inFlight || core.cache.has(remote.key, i)) {
+            if (i in inFlight || isCached(i)) {
                 i++
                 continue
             }
             val run = mutableListOf<Long>()
-            while (i < end && run.size < RUN && !core.cache.has(remote.key, i) && inFlight.add(i)) {
+            while (i < end && run.size < RUN && !isCached(i) && inFlight.add(i)) {
                 run += i
                 i++
             }
@@ -120,6 +132,12 @@ class StreamingFile(
         }
         // The queue serves newest first, so submit the farthest run first and the nearest last.
         runs.asReversed().forEach { submit(it) }
+    }
+
+    private fun isCached(index: Long): Boolean {
+        val i = index.toInt()
+        if (known.get(i)) return true
+        return core.cache.has(remote.key, index).also { if (it) known.set(i) }
     }
 
     private fun submit(run: List<Long>) {
