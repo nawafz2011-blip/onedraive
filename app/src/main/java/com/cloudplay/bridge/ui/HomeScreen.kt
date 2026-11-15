@@ -253,6 +253,13 @@ private fun ActivityCard() {
                 lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
             val context = LocalContext.current
+            Button(onClick = {
+                val clipboard = context.getSystemService(android.content.ClipboardManager::class.java)
+                clipboard.setPrimaryClip(
+                    android.content.ClipData.newPlainText("CloudPlay", com.cloudplay.bridge.core.Diag.compact(BuildConfig.VERSION_NAME))
+                )
+                android.widget.Toast.makeText(context, "انتسخ السجل. الصقه في المحادثة.", android.widget.Toast.LENGTH_LONG).show()
+            }) { Text("نسخ السجل") }
             OutlinedButton(onClick = { shareDiagnostics(context) }) { Text("إرسال سجل التشخيص") }
         }
     }

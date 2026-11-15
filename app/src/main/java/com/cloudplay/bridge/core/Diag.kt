@@ -60,6 +60,21 @@ object Diag {
         )
     }
 
+    /** Short version for pasting into a chat: header, the key events and the last summaries. */
+    fun compact(versionName: String): String {
+        val all = synchronized(lines) { lines.toList() }
+        val keep = all.filter { l -> KEY.any { l.contains(it) } }.takeLast(160)
+        val counts = listOf("JUMP", "MISS", "RUN", "SKIP", "SLOW", "ERR", "EXPIRED")
+            .joinToString(" ") { k -> "$k=" + all.count { it.contains(" $k ") } }
+        return buildString {
+            append("CloudPlay ").append(versionName).append(" · ").append(Build.MODEL).append('\n')
+            append(counts).append('\n')
+            keep.forEach { append(it).append('\n') }
+        }
+    }
+
+    private val KEY = listOf(" SUM ", " OPEN ", " ERR ", " SLOW ", " EXPIRED ", " MISS ")
+
     fun dump(versionName: String): String = buildString {
         append("CloudPlay ").append(versionName)
         append(" · Android ").append(Build.VERSION.RELEASE).append(" · ").append(Build.MODEL).append('\n')
