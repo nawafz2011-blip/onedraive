@@ -66,7 +66,8 @@ class OneDriveProvider : DocumentsProvider() {
                 add(Document.COLUMN_LAST_MODIFIED, null)
             }
         } else {
-            addRow(cursor, items[documentId] ?: fetchItem(documentId))
+            val id = realId(documentId)
+            addRow(cursor, items[id] ?: fetchItem(id))
         }
         return cursor
     }
@@ -77,6 +78,7 @@ class OneDriveProvider : DocumentsProvider() {
         sortOrder: String?,
     ): Cursor {
         val cursor = MatrixCursor(projection ?: DEFAULT_DOCUMENT_PROJECTION)
+        val parentDocumentId = realId(parentDocumentId)
         val cached = listings[parentDocumentId]
         val children = if (cached != null && System.currentTimeMillis() - cached.first < LISTING_TTL_MS) {
             cached.second
@@ -103,7 +105,8 @@ class OneDriveProvider : DocumentsProvider() {
     }
 
     override fun isChildDocument(parentDocumentId: String, documentId: String): Boolean {
-        var current = documentId
+        val parentDocumentId = realId(parentDocumentId)
+        var current = realId(documentId)
         repeat(64) {
             if (current == parentDocumentId) return true
             if (current == ROOT_ID) return false
@@ -129,8 +132,9 @@ class OneDriveProvider : DocumentsProvider() {
         if (mode != "r") Diag.log("OPEN as read-only (asked mode=$mode)")
         // Reuse the item from the folder listing (its download link stays valid for a while,
         // and an expired one is refreshed on first read) instead of a network round trip per open.
-        val fresh = (itemTimes[documentId] ?: 0L) > System.currentTimeMillis() - ITEM_TTL_MS
-        val item = items[documentId]?.takeIf { fresh && it.downloadUrl != null } ?: fetchItem(documentId)
+        val id = realId(documentId)
+        val fresh = (itemTimes[id] ?: 0L) > System.currentTimeMillis() - ITEM_TTL_MS
+        val item = items[id]?.takeIf { fresh && it.downloadUrl != null } ?: fetchItem(id)
         if (item.isFolder) throw FileNotFoundException("${item.name} is a folder")
         val thread = HandlerThread("cloudplay-${item.name}").apply { start() }
         LiveNotifier.start(context!!)
@@ -172,6 +176,16 @@ class OneDriveProvider : DocumentsProvider() {
             block()
         }
 
+    /**
+     * File document IDs end with the file name ("<OneDrive id>/Crazy Taxi.iso"), like the
+     * system's own storage provider. The PS2 emulator's folder scan decides what is a game
+     * from the end of the document URI, so bare OneDrive IDs made it skip every file.
+     * Anything after the first '/' is ignored on the way in; folder IDs stay bare.
+     */
+    private fun docIdOf(item: DriveItem) = if (item.isFolder) item.id else item.id + "/" + item.name
+
+    private fun realId(documentId: String) = documentId.substringBefore('/')
+
     private fun remember(item: DriveItem) {
         items[item.id] = item
         itemTimes[item.id] = System.currentTimeMillis()
@@ -179,7 +193,7 @@ class OneDriveProvider : DocumentsProvider() {
 
     private fun addRow(cursor: MatrixCursor, item: DriveItem) {
         cursor.newRow().apply {
-            add(Document.COLUMN_DOCUMENT_ID, item.id)
+            add(Document.COLUMN_DOCUMENT_ID, docIdOf(item))
             add(Document.COLUMN_DISPLAY_NAME, item.name)
             add(Document.COLUMN_MIME_TYPE, mimeOf(item))
             add(Document.COLUMN_FLAGS, 0)
