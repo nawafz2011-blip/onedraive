@@ -67,7 +67,7 @@ class OneDriveProvider : DocumentsProvider() {
             }
         } else {
             val id = realId(documentId)
-            addRow(cursor, items[id] ?: fetchItem(id))
+            addRow(cursor, items[id] ?: fetchItem(id), documentId)
         }
         return cursor
     }
@@ -79,19 +79,9 @@ class OneDriveProvider : DocumentsProvider() {
     ): Cursor {
         val cursor = MatrixCursor(projection ?: DEFAULT_DOCUMENT_PROJECTION)
         val parentDocumentId = realId(parentDocumentId)
-        val cached = listings[parentDocumentId]
-        val children = if (cached != null && System.currentTimeMillis() - cached.first < LISTING_TTL_MS) {
-            cached.second
-        } else {
-            val fresh = try {
-                offMain { core.graph.children(parentDocumentId) }
-            } catch (e: Exception) {
-                Diag.log("ERR list $parentDocumentId: ${e.javaClass.simpleName} ${e.message}")
-                throw FileNotFoundException("Couldn't list OneDrive folder: ${e.message}")
-            }
-            listings[parentDocumentId] = System.currentTimeMillis() to fresh
-            fresh
-        }
+        // Asked to list a file (emulators probing paths): it has no children.
+        if (items[parentDocumentId]?.isFolder == false) return cursor
+        val children = childrenOf(parentDocumentId)
         Diag.log("LIST $parentDocumentId: ${children.size} items: " +
             children.take(8).joinToString { (if (it.isFolder) "[" + it.name + "]" else it.name).take(40) })
         for (child in children) {
@@ -99,7 +89,7 @@ class OneDriveProvider : DocumentsProvider() {
             if (!child.isFolder && child.size == 0L) continue
             remember(child)
             parents[child.id] = parentDocumentId
-            addRow(cursor, child)
+            addRow(cursor, child, docIdOf(child, parentDocumentId))
         }
         return cursor
     }
@@ -182,18 +172,55 @@ class OneDriveProvider : DocumentsProvider() {
      * from the end of the document URI, so bare OneDrive IDs made it skip every file.
      * Anything after the first '/' is ignored on the way in; folder IDs stay bare.
      */
-    private fun docIdOf(item: DriveItem) = if (item.isFolder) item.id else item.id + "/" + item.name
+    private fun docIdOf(item: DriveItem, parentId: String) =
+        if (item.isFolder) item.id else "$parentId/${item.name}"
 
-    private fun realId(documentId: String) = documentId.substringBefore('/')
+    /**
+     * Folder IDs are bare OneDrive IDs. File IDs are "<folder id>/<name>" (more segments are
+     * accepted, like a relative path), so emulators that take the part before the last '/' as
+     * the containing folder, or build a sibling's path from it (.cue next to .bin), get it right.
+     */
+    private fun realId(documentId: String): String {
+        val parts = documentId.split('/')
+        if (parts.size == 1) return documentId
+        var current = parts[0]
+        for (name in parts.drop(1)) {
+            if (name.isEmpty()) continue
+            val kids = childrenOf(current)
+            val hit = kids.firstOrNull { it.name == name }
+                ?: kids.firstOrNull { it.name.equals(name, ignoreCase = true) }
+                ?: run {
+                    Diag.log("ERR no '$name' in $current")
+                    throw FileNotFoundException("$name not found")
+                }
+            remember(hit)
+            parents[hit.id] = current
+            current = hit.id
+        }
+        return current
+    }
+
+    private fun childrenOf(folderId: String): List<DriveItem> {
+        val cached = listings[folderId]
+        if (cached != null && System.currentTimeMillis() - cached.first < LISTING_TTL_MS) return cached.second
+        val fresh = try {
+            offMain { core.graph.children(folderId) }
+        } catch (e: Exception) {
+            Diag.log("ERR list $folderId: ${e.javaClass.simpleName} ${e.message}")
+            throw FileNotFoundException("Couldn't list OneDrive folder: ${e.message}")
+        }
+        listings[folderId] = System.currentTimeMillis() to fresh
+        return fresh
+    }
 
     private fun remember(item: DriveItem) {
         items[item.id] = item
         itemTimes[item.id] = System.currentTimeMillis()
     }
 
-    private fun addRow(cursor: MatrixCursor, item: DriveItem) {
+    private fun addRow(cursor: MatrixCursor, item: DriveItem, documentId: String) {
         cursor.newRow().apply {
-            add(Document.COLUMN_DOCUMENT_ID, docIdOf(item))
+            add(Document.COLUMN_DOCUMENT_ID, documentId)
             add(Document.COLUMN_DISPLAY_NAME, item.name)
             add(Document.COLUMN_MIME_TYPE, mimeOf(item))
             add(Document.COLUMN_FLAGS, 0)
