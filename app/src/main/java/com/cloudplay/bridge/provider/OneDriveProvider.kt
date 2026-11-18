@@ -84,11 +84,14 @@ class OneDriveProvider : DocumentsProvider() {
             val fresh = try {
                 core.graph.children(parentDocumentId)
             } catch (e: Exception) {
+                Diag.log("ERR list $parentDocumentId: ${e.javaClass.simpleName} ${e.message}")
                 throw FileNotFoundException("Couldn't list OneDrive folder: ${e.message}")
             }
             listings[parentDocumentId] = System.currentTimeMillis() to fresh
             fresh
         }
+        Diag.log("LIST $parentDocumentId: ${children.size} items: " +
+            children.take(8).joinToString { (if (it.isFolder) "[" + it.name + "]" else it.name).take(40) })
         for (child in children) {
             // Empty files (failed or unfinished uploads) crash emulators that try to parse them.
             if (!child.isFolder && child.size == 0L) continue
@@ -117,7 +120,13 @@ class OneDriveProvider : DocumentsProvider() {
         mode: String,
         signal: CancellationSignal?,
     ): ParcelFileDescriptor {
-        if (mode != "r") throw FileNotFoundException("CloudPlay is read-only")
+        // Some emulators ask for "rw" on game images they only ever read. Serve those
+        // read-only too (writes fail on the descriptor); refuse write-only opens.
+        if ('r' !in mode) {
+            Diag.log("REFUSED open mode=$mode id=$documentId")
+            throw FileNotFoundException("CloudPlay is read-only")
+        }
+        if (mode != "r") Diag.log("OPEN as read-only (asked mode=$mode)")
         // Reuse the item from the folder listing (its download link stays valid for a while,
         // and an expired one is refreshed on first read) instead of a network round trip per open.
         val fresh = (itemTimes[documentId] ?: 0L) > System.currentTimeMillis() - ITEM_TTL_MS
@@ -148,6 +157,7 @@ class OneDriveProvider : DocumentsProvider() {
             it.parentId?.let { p -> parents[id] = p }
         }
     } catch (e: Exception) {
+        Diag.log("ERR item $id: ${e.javaClass.simpleName} ${e.message}")
         throw FileNotFoundException("Couldn't read OneDrive item: ${e.message}")
     }
 

@@ -73,7 +73,7 @@ object Diag {
         }
     }
 
-    private val KEY = listOf(" SUM ", " OPEN ", " ERR ", " SLOW ", " EXPIRED ", " MISS ")
+    private val KEY = listOf(" SUM ", " OPEN ", " ERR ", " SLOW ", " EXPIRED ", " MISS ", " LIST ", " REFUSED ")
 
     fun dump(versionName: String): String = buildString {
         append("CloudPlay ").append(versionName)
