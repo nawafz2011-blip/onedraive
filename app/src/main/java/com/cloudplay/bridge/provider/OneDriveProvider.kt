@@ -45,7 +45,10 @@ class OneDriveProvider : DocumentsProvider() {
             add(Root.COLUMN_DOCUMENT_ID, ROOT_ID)
             add(Root.COLUMN_TITLE, "CloudPlay")
             add(Root.COLUMN_SUMMARY, "OneDrive")
-            add(Root.COLUMN_FLAGS, Root.FLAG_SUPPORTS_IS_CHILD)
+            // FLAG_LOCAL_ONLY: some emulators (e.g. the PS2 one) open their folder picker with
+            // EXTRA_LOCAL_ONLY, which hides every root without it. Data is served from the
+            // on-device cache, so CloudPlay behaves like local storage to them.
+            add(Root.COLUMN_FLAGS, Root.FLAG_SUPPORTS_IS_CHILD or Root.FLAG_LOCAL_ONLY)
             add(Root.COLUMN_ICON, R.drawable.ic_cloud)
         }
         return cursor
