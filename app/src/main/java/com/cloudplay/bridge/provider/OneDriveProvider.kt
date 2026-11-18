@@ -82,7 +82,7 @@ class OneDriveProvider : DocumentsProvider() {
             cached.second
         } else {
             val fresh = try {
-                core.graph.children(parentDocumentId)
+                offMain { core.graph.children(parentDocumentId) }
             } catch (e: Exception) {
                 Diag.log("ERR list $parentDocumentId: ${e.javaClass.simpleName} ${e.message}")
                 throw FileNotFoundException("Couldn't list OneDrive folder: ${e.message}")
@@ -152,7 +152,7 @@ class OneDriveProvider : DocumentsProvider() {
     }
 
     private fun fetchItem(id: String): DriveItem = try {
-        core.graph.item(id).also {
+        offMain { core.graph.item(id) }.also {
             remember(it)
             it.parentId?.let { p -> parents[id] = p }
         }
@@ -160,6 +160,17 @@ class OneDriveProvider : DocumentsProvider() {
         Diag.log("ERR item $id: ${e.javaClass.simpleName} ${e.message}")
         throw FileNotFoundException("Couldn't read OneDrive item: ${e.message}")
     }
+
+    /**
+     * Some callers reach the provider on CloudPlay's main thread, where Android forbids network
+     * access (NetworkOnMainThreadException in the log). Run the request on a worker and wait.
+     */
+    private fun <T> offMain(block: () -> T): T =
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            prefetcher.submit(java.util.concurrent.Callable { block() }).get(20, TimeUnit.SECONDS)
+        } else {
+            block()
+        }
 
     private fun remember(item: DriveItem) {
         items[item.id] = item
