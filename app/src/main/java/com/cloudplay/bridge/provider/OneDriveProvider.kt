@@ -183,10 +183,17 @@ class OneDriveProvider : DocumentsProvider() {
     private fun realId(documentId: String): String {
         val parts = documentId.split('/')
         if (parts.size == 1) return documentId
+        // 1.130 handed out "<file id>/<name>"; emulators may still have those saved.
+        if (parts.size == 2 && items[parts[0]]?.isFolder == false) return parts[0]
         var current = parts[0]
         for (name in parts.drop(1)) {
             if (name.isEmpty()) continue
-            val kids = childrenOf(current)
+            val kids = try {
+                childrenOf(current)
+            } catch (e: FileNotFoundException) {
+                // Not a folder: an old "<file id>/<name>" ID.
+                if (current == parts[0] && parts.size == 2) return parts[0] else throw e
+            }
             val hit = kids.firstOrNull { it.name == name }
                 ?: kids.firstOrNull { it.name.equals(name, ignoreCase = true) }
                 ?: run {
